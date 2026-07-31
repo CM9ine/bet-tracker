@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# User data — never committed (public repo)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+/data
+
+# Build / tooling
+dist/
+coverage/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+
+# OS / editor
+.DS_Store
