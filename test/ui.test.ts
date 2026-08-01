@@ -222,4 +222,43 @@ describe("server-rendered UI", () => {
     expect(response.headers.get("content-type")).toContain("text/html; charset=UTF-8");
     expect(await response.text()).toContain("—");
   });
+  it("renders verification details and an empty summary", async () => {
+    const app = setup();
+    const empty = await (await app.request("/verify/view")).text();
+    expect(empty).toContain("Checked: 0");
+    expect(empty).toContain("Mismatches: 0");
+    expect(empty).toContain("Net delta: £0.00");
+
+    await createJson(app, { selection: "Penny short", status: "won", returns_pence: 2499 });
+    const response = await app.request("/verify/view");
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html; charset=UTF-8");
+    expect(body).toContain("Penny short");
+    expect(body).toContain("£24.99");
+    expect(body).toContain("£25.00");
+    expect(body).toContain("-£0.01");
+    expect(body).toContain("Checked: 1");
+    expect(body).toContain("Mismatches: 1");
+  });
+
+  it("marks only mismatched bet rows and shows their expected return", async () => {
+    const app = setup();
+    await createJson(app, { selection: "Matching", status: "won", returns_pence: 2500 });
+    await createJson(app, { selection: "Mismatched", status: "won", returns_pence: 2499 });
+
+    const body = await (await app.request("/")).text();
+    expect(body.match(/class="mismatch"/g)).toHaveLength(1);
+    expect(body).toContain("<small>expected £25.00</small>");
+  });
+
+  it.each(["/", "/stats/view", "/verify/view"])(
+    "links all three pages from %s",
+    async (path) => {
+      const body = await (await setup().request(path)).text();
+      expect(body).toContain('<a href="/">Bets</a>');
+      expect(body).toContain('<a href="/stats/view">Stats</a>');
+      expect(body).toContain('<a href="/verify/view">Verify</a>');
+    },
+  );
 });

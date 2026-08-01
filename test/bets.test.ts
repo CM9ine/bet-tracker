@@ -65,6 +65,12 @@ describe("bets API", () => {
       dead_heat_place_den: null,
       status: "open",
       returns_pence: null,
+      verification: {
+        status: "not_applicable",
+        expected_returns_pence: null,
+        delta_pence: null,
+        error: null,
+      },
     });
   });
 

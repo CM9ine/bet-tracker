@@ -101,4 +101,82 @@ describe("app", () => {
     expect(body.by_month.map((row) => row.month)).toEqual(["2026-03", "2026-01"]);
     expect(body.by_tipster.map((row) => row.tipster?.name ?? null)).toEqual(["Alice", "zoe", null]);
   });
+  it("reports verification summaries and discrepancies", async () => {
+    const app = createApp(openDb(":memory:"));
+    await createBet(app, { selection: "Matching", status: "won", returns_pence: 2500 });
+    const short = await createBet(app, { selection: "Short", status: "won", returns_pence: 2499 });
+    await createBet(app, { selection: "Open", status: "open", returns_pence: null });
+
+    const response = await app.request("/verify");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      checked_count: 2,
+      ok_count: 1,
+      mismatch_count: 1,
+      uncheckable_count: 0,
+      net_delta_pence: -1,
+      discrepancies: [
+        expect.objectContaining({
+          id: short.id,
+          verification: {
+            status: "mismatch",
+            expected_returns_pence: 2500,
+            delta_pence: -1,
+            error: null,
+          },
+        }),
+      ],
+    });
+  });
+
+  it("filters verification by London date and tipster and validates dates", async () => {
+    const app = createApp(openDb(":memory:"));
+    await createBet(app, { placed_at: "2026-07-31", selection: "Before", tipster: "X", status: "won", returns_pence: 2499 });
+    await createBet(app, { placed_at: "2026-08-01", selection: "Included", tipster: "X", status: "won", returns_pence: 2499 });
+    await createBet(app, { placed_at: "2026-08-01", selection: "Other", tipster: "Y", status: "won", returns_pence: 2499 });
+    await createBet(app, { placed_at: "2026-08-02", selection: "After", tipster: "X", status: "won", returns_pence: 2499 });
+
+    const response = await app.request("/verify?from=2026-08-01&to=2026-08-01&tipster=x");
+    expect(response.status).toBe(200);
+    const report = (await response.json()) as { discrepancies: Array<{ selection: string }> };
+    expect(report.discrepancies.map((bet) => bet.selection)).toEqual(["Included"]);
+
+    const malformed = await app.request("/verify?from=nonsense");
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toEqual({ error: expect.any(String) });
+  });
+
+  it("reports an uncheckable stored bet without returning 500", async () => {
+    const app = createApp(openDb(":memory:"));
+    await createBet(app, { status: "placed", returns_pence: 1500 });
+
+    const response = await app.request("/verify");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      checked_count: 0,
+      uncheckable_count: 1,
+      discrepancies: [{
+        verification: {
+          status: "uncheckable",
+          expected_returns_pence: null,
+          delta_pence: null,
+          error: "a single bet cannot have placed status",
+        },
+      }],
+    });
+  });
+
+  it("includes verification on an individual bet response", async () => {
+    const app = createApp(openDb(":memory:"));
+    await createBet(app, { status: "won", returns_pence: 2499 });
+
+    expect(await (await app.request("/bets/1")).json()).toMatchObject({
+      verification: {
+        status: "mismatch",
+        expected_returns_pence: 2500,
+        delta_pence: -1,
+        error: null,
+      },
+    });
+  });
 });
