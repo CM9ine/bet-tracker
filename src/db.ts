@@ -30,8 +30,13 @@ function migrate(db: Database.Database): void {
       place_fraction_num INTEGER,
       place_fraction_den INTEGER,
       places_count       INTEGER,
+      rule4_pence_in_pound INTEGER,
+      dead_heat_win_num  INTEGER,
+      dead_heat_win_den  INTEGER,
+      dead_heat_place_num INTEGER,
+      dead_heat_place_den INTEGER,
       status             TEXT NOT NULL DEFAULT 'open'
-                           CHECK (status IN ('open','won','placed','dead_heat','lost','void')),
+                           CHECK (status IN ('open','won','placed','lost','void')),
       returns_pence      INTEGER,
       deleted_at         TEXT
     );

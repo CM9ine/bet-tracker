@@ -13,7 +13,7 @@ import type {
 
 const BET_TYPES = ["single", "each_way"] as const;
 const STAKE_TYPES = ["cash", "free_snr", "free_sr"] as const;
-const BET_STATUSES = ["open", "won", "placed", "dead_heat", "lost", "void"] as const;
+const BET_STATUSES = ["open", "won", "placed", "lost", "void"] as const;
 
 interface BetDbRow {
   id: number;
@@ -29,6 +29,11 @@ interface BetDbRow {
   place_fraction_num: number | null;
   place_fraction_den: number | null;
   places_count: number | null;
+  rule4_pence_in_pound: number | null;
+  dead_heat_win_num: number | null;
+  dead_heat_win_den: number | null;
+  dead_heat_place_num: number | null;
+  dead_heat_place_den: number | null;
   status: BetStatus;
   returns_pence: number | null;
   deleted_at: string | null;
@@ -46,6 +51,11 @@ interface ValidatedBet {
   placeFractionNum: number | null;
   placeFractionDen: number | null;
   placesCount: number | null;
+  rule4PenceInPound: number | null;
+  deadHeatWinNum: number | null;
+  deadHeatWinDen: number | null;
+  deadHeatPlaceNum: number | null;
+  deadHeatPlaceDen: number | null;
   status: BetStatus;
   returnsPence: Pence | null;
 }
@@ -67,6 +77,11 @@ const SELECT_BET = `
     b.place_fraction_num,
     b.place_fraction_den,
     b.places_count,
+    b.rule4_pence_in_pound,
+    b.dead_heat_win_num,
+    b.dead_heat_win_den,
+    b.dead_heat_place_num,
+    b.dead_heat_place_den,
     b.status,
     b.returns_pence,
     b.deleted_at
@@ -90,8 +105,10 @@ export function createApp(db: Database.Database): Hono {
             `INSERT INTO bets (
               placed_at, event, selection, tipster_id, stake_pence, odds_hundredths,
               bet_type, stake_type, place_fraction_num, place_fraction_den,
-              places_count, status, returns_pence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              places_count, rule4_pence_in_pound, dead_heat_win_num,
+              dead_heat_win_den, dead_heat_place_num, dead_heat_place_den,
+              status, returns_pence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             bet.placedAt,
@@ -105,6 +122,11 @@ export function createApp(db: Database.Database): Hono {
             bet.placeFractionNum,
             bet.placeFractionDen,
             bet.placesCount,
+            bet.rule4PenceInPound,
+            bet.deadHeatWinNum,
+            bet.deadHeatWinDen,
+            bet.deadHeatPlaceNum,
+            bet.deadHeatPlaceDen,
             bet.status,
             bet.returnsPence,
           );
@@ -187,6 +209,11 @@ export function createApp(db: Database.Database): Hono {
             place_fraction_num = ?,
             place_fraction_den = ?,
             places_count = ?,
+            rule4_pence_in_pound = ?,
+            dead_heat_win_num = ?,
+            dead_heat_win_den = ?,
+            dead_heat_place_num = ?,
+            dead_heat_place_den = ?,
             status = ?,
             returns_pence = ?
           WHERE id = ? AND deleted_at IS NULL`,
@@ -202,6 +229,11 @@ export function createApp(db: Database.Database): Hono {
           bet.placeFractionNum,
           bet.placeFractionDen,
           bet.placesCount,
+          bet.rule4PenceInPound,
+          bet.deadHeatWinNum,
+          bet.deadHeatWinDen,
+          bet.deadHeatPlaceNum,
+          bet.deadHeatPlaceDen,
           bet.status,
           bet.returnsPence,
           id,
@@ -256,6 +288,11 @@ function validateCreate(body: Record<string, unknown>): ValidatedBet {
     placeFractionNum: body.place_fraction_num ?? null,
     placeFractionDen: body.place_fraction_den ?? null,
     placesCount: body.places_count ?? null,
+    rule4PenceInPound: body.rule4_pence_in_pound ?? null,
+    deadHeatWinNum: body.dead_heat_win_num ?? null,
+    deadHeatWinDen: body.dead_heat_win_den ?? null,
+    deadHeatPlaceNum: body.dead_heat_place_num ?? null,
+    deadHeatPlaceDen: body.dead_heat_place_den ?? null,
     status: body.status ?? "open",
     returnsPence: body.returns_pence ?? null,
   });
@@ -278,6 +315,23 @@ function validatePatch(existing: BetDbRow, body: Record<string, unknown>): Valid
     placeFractionNum: propertyOr(body, "place_fraction_num", existing.place_fraction_num),
     placeFractionDen: propertyOr(body, "place_fraction_den", existing.place_fraction_den),
     placesCount: propertyOr(body, "places_count", existing.places_count),
+    rule4PenceInPound: propertyOr(
+      body,
+      "rule4_pence_in_pound",
+      existing.rule4_pence_in_pound,
+    ),
+    deadHeatWinNum: propertyOr(body, "dead_heat_win_num", existing.dead_heat_win_num),
+    deadHeatWinDen: propertyOr(body, "dead_heat_win_den", existing.dead_heat_win_den),
+    deadHeatPlaceNum: propertyOr(
+      body,
+      "dead_heat_place_num",
+      existing.dead_heat_place_num,
+    ),
+    deadHeatPlaceDen: propertyOr(
+      body,
+      "dead_heat_place_den",
+      existing.dead_heat_place_den,
+    ),
     status: propertyOr(body, "status", existing.status),
     returnsPence: propertyOr(body, "returns_pence", existing.returns_pence),
   });
@@ -295,6 +349,11 @@ function validateBet(input: {
   placeFractionNum: unknown;
   placeFractionDen: unknown;
   placesCount: unknown;
+  rule4PenceInPound: unknown;
+  deadHeatWinNum: unknown;
+  deadHeatWinDen: unknown;
+  deadHeatPlaceNum: unknown;
+  deadHeatPlaceDen: unknown;
   status: unknown;
   returnsPence: unknown;
 }): ValidatedBet {
@@ -312,6 +371,26 @@ function validateBet(input: {
   const placeFractionNum = optionalInteger(input.placeFractionNum, "place_fraction_num");
   const placeFractionDen = optionalInteger(input.placeFractionDen, "place_fraction_den");
   const placesCount = optionalInteger(input.placesCount, "places_count");
+  const rule4PenceInPound = optionalInteger(
+    input.rule4PenceInPound,
+    "rule4_pence_in_pound",
+  );
+  if (
+    rule4PenceInPound !== null &&
+    (rule4PenceInPound < 0 || rule4PenceInPound > 90)
+  ) {
+    throw new ValidationError("rule4_pence_in_pound must be between 0 and 90");
+  }
+  const winDeadHeat = validateDeadHeatFraction(
+    input.deadHeatWinNum,
+    input.deadHeatWinDen,
+    "dead_heat_win",
+  );
+  const placeDeadHeat = validateDeadHeatFraction(
+    input.deadHeatPlaceNum,
+    input.deadHeatPlaceDen,
+    "dead_heat_place",
+  );
 
   if (betType === "each_way") {
     requirePositivePlaceTerm(placeFractionNum, "place_fraction_num");
@@ -323,6 +402,9 @@ function validateBet(input: {
     placesCount !== null
   ) {
     throw new ValidationError("single bets cannot include each-way place terms");
+  }
+  if (betType === "single" && placeDeadHeat.num !== null) {
+    throw new ValidationError("single bets cannot include place dead heat terms");
   }
 
   let returnsPence: Pence | null = null;
@@ -345,6 +427,11 @@ function validateBet(input: {
     placeFractionNum,
     placeFractionDen,
     placesCount,
+    rule4PenceInPound,
+    deadHeatWinNum: winDeadHeat.num,
+    deadHeatWinDen: winDeadHeat.den,
+    deadHeatPlaceNum: placeDeadHeat.num,
+    deadHeatPlaceDen: placeDeadHeat.den,
     status,
     returnsPence,
   };
@@ -395,6 +482,27 @@ function optionalInteger(value: unknown, field: string): number | null {
     throw new ValidationError(`${field} must be an integer`);
   }
   return value as number;
+}
+
+function validateDeadHeatFraction(
+  numeratorInput: unknown,
+  denominatorInput: unknown,
+  field: string,
+): { num: number | null; den: number | null } {
+  const numerator = optionalInteger(numeratorInput, `${field}_num`);
+  const denominator = optionalInteger(denominatorInput, `${field}_den`);
+  if (numerator === null && denominator === null) {
+    return { num: null, den: null };
+  }
+  if (numerator === null || denominator === null) {
+    throw new ValidationError(
+      `${field}_num and ${field}_den must both be null or integers`,
+    );
+  }
+  if (numerator < 1 || denominator < 1 || numerator > denominator) {
+    throw new ValidationError(`${field} must satisfy 1 <= num <= den`);
+  }
+  return { num: numerator, den: denominator };
 }
 
 function requirePositivePlaceTerm(value: number | null, field: string): asserts value is number {
@@ -479,6 +587,11 @@ function toBet(row: BetDbRow): Bet {
     place_fraction_num: row.place_fraction_num,
     place_fraction_den: row.place_fraction_den,
     places_count: row.places_count,
+    rule4_pence_in_pound: row.rule4_pence_in_pound,
+    dead_heat_win_num: row.dead_heat_win_num,
+    dead_heat_win_den: row.dead_heat_win_den,
+    dead_heat_place_num: row.dead_heat_place_num,
+    dead_heat_place_den: row.dead_heat_place_den,
     status: row.status,
     returns_pence: row.returns_pence,
   };

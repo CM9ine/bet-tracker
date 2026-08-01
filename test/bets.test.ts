@@ -58,6 +58,11 @@ describe("bets API", () => {
       place_fraction_num: null,
       place_fraction_den: null,
       places_count: null,
+      rule4_pence_in_pound: null,
+      dead_heat_win_num: null,
+      dead_heat_win_den: null,
+      dead_heat_place_num: null,
+      dead_heat_place_den: null,
       status: "open",
       returns_pence: null,
     });
@@ -225,10 +230,59 @@ describe("bets API", () => {
     expect(await response.json()).toMatchObject({ stake_type: stakeType });
   });
 
-  it.each(["placed", "dead_heat"])("accepts status %s", async (status) => {
+  it("accepts placed status", async () => {
     const { app } = setup();
-    const response = await createBet(app, { status });
+    const response = await createBet(app, { status: "placed" });
     expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({ status });
+    expect(await response.json()).toMatchObject({ status: "placed" });
+  });
+
+  it("round-trips Rule 4 and dead-heat terms through create, get, and patch", async () => {
+    const { app } = setup();
+    const created = await createBet(app, {
+      rule4_pence_in_pound: 25,
+      dead_heat_win_num: 1,
+      dead_heat_win_den: 2,
+    });
+
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({
+      rule4_pence_in_pound: 25,
+      dead_heat_win_num: 1,
+      dead_heat_win_den: 2,
+      dead_heat_place_num: null,
+      dead_heat_place_den: null,
+    });
+
+    expect(await (await app.request("/bets/1")).json()).toMatchObject({
+      rule4_pence_in_pound: 25,
+      dead_heat_win_num: 1,
+      dead_heat_win_den: 2,
+    });
+
+    const patched = await sendJson(app, "/bets/1", "PATCH", {
+      rule4_pence_in_pound: 10,
+      dead_heat_win_num: 1,
+      dead_heat_win_den: 3,
+    });
+    expect(patched.status).toBe(200);
+    expect(await patched.json()).toMatchObject({
+      rule4_pence_in_pound: 10,
+      dead_heat_win_num: 1,
+      dead_heat_win_den: 3,
+    });
+  });
+
+  it.each([
+    ["dead_heat status", { status: "dead_heat" }],
+    ["Rule 4 above 90", { rule4_pence_in_pound: 91 }],
+    [
+      "place dead heat on a single",
+      { dead_heat_place_num: 1, dead_heat_place_den: 2 },
+    ],
+  ])("rejects %s", async (_name, overrides) => {
+    const { app } = setup();
+    const response = await createBet(app, overrides);
+    expect(response.status).toBe(400);
   });
 });
