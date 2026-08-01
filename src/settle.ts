@@ -30,6 +30,16 @@ export interface SettlementInput {
   dead_heat_place_den?: number | null;
 }
 
+export function riskedPence(input: {
+  stake_pence: Pence;
+  bet_type: BetType;
+  stake_type: StakeType;
+}): Pence {
+  return input.stake_type === "cash"
+    ? input.stake_pence * (input.bet_type === "each_way" ? 2 : 1)
+    : 0;
+}
+
 export function settle(bet: SettlementInput): Settlement {
   if (bet.status === "open") {
     throw new SettlementError("an open bet cannot be settled");
@@ -74,10 +84,7 @@ export function settle(bet: SettlementInput): Settlement {
     );
   }
 
-  const risked =
-    bet.stake_type === "cash"
-      ? bet.stake_pence * (bet.bet_type === "each_way" ? 2 : 1)
-      : 0;
+  const risked = riskedPence(bet);
 
   if (bet.status === "void") {
     const totalPence = bet.stake_type === "cash" ? risked : 0;
