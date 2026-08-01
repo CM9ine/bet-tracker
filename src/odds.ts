@@ -25,3 +25,9 @@ export function parseOdds(input: string): OddsHundredths {
 
   return hundredths;
 }
+
+export function formatOdds(hundredths: OddsHundredths): string {
+  const whole = Math.floor(hundredths / 100);
+  const fraction = String(hundredths % 100).padStart(2, "0");
+  return `${whole}.${fraction}`;
+}
