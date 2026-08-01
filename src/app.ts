@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { parseOdds } from "./odds.ts";
+import { computeStats, londonLocalDate } from "./stats.ts";
 import type {
   Bet,
   BetStatus,
@@ -169,6 +170,37 @@ export function createApp(db: Database.Database): Hono {
         .all(...parameters) as BetDbRow[];
 
       return c.json(rows.map(toBet));
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
+  app.get("/stats", (c) => {
+    try {
+      const from = validateStatsDate(c.req.query("from"), "from");
+      const to = validateStatsDate(c.req.query("to"), "to");
+      const tipster = c.req.query("tipster");
+      const conditions = ["b.deleted_at IS NULL", "b.status != 'open'"];
+      const parameters: string[] = [];
+
+      if (tipster !== undefined) {
+        conditions.push("t.name = ? COLLATE NOCASE");
+        parameters.push(tipster);
+      }
+
+      const rows = db
+        .prepare(
+          `${SELECT_BET}
+           WHERE ${conditions.join(" AND ")}`,
+        )
+        .all(...parameters) as BetDbRow[];
+      const bets = rows.map(toBet).filter((bet) => {
+        const localDate = londonLocalDate(bet.placed_at);
+        return (from === undefined || localDate >= from) &&
+          (to === undefined || localDate <= to);
+      });
+
+      return c.json(computeStats(bets));
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 400);
     }
@@ -530,6 +562,16 @@ function validateStatus(value: unknown): BetStatus {
     throw new ValidationError("status is invalid");
   }
   return value as BetStatus;
+}
+
+function validateStatsDate(
+  value: string | undefined,
+  field: "from" | "to",
+): string | undefined {
+  if (value !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ValidationError(`${field} must be YYYY-MM-DD`);
+  }
+  return value;
 }
 
 function isValidPlacedAt(value: string): boolean {
