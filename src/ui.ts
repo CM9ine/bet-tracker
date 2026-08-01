@@ -4,7 +4,8 @@ import { formatPence, parsePence } from "./money.ts";
 import { formatOdds } from "./odds.ts";
 import { riskedPence } from "./settle.ts";
 import { londonLocalDate, type Stats, type StatsGroup } from "./stats.ts";
-import type { Bet, Tipster } from "./types.ts";
+import type { Tipster, VerifiedBet } from "./types.ts";
+import type { VerificationReport } from "./verify.ts";
 
 type HtmlContent = ReturnType<typeof html>;
 
@@ -42,6 +43,24 @@ export function createUi(api: Hono): Hono {
       );
     }
     return c.html(statsPage((await response.json()) as Stats, filters));
+  });
+
+  ui.get("/verify/view", async (c) => {
+    const filters = {
+      from: c.req.query("from") ?? "",
+      to: c.req.query("to") ?? "",
+      tipster: c.req.query("tipster") ?? "",
+    };
+    const response = await api.request(queryPath("/verify", filters));
+    if (!response.ok) {
+      return c.html(
+        verifyPage(emptyVerificationReport(), filters, await readApiError(response)),
+        400,
+      );
+    }
+    return c.html(
+      verifyPage((await response.json()) as VerificationReport, filters),
+    );
   });
 
   ui.post("/ui/bets", async (c) => {
@@ -135,7 +154,9 @@ async function renderBetsPage(
     api.request(queryPath("/bets", filters)),
     api.request("/tipsters"),
   ]);
-  const bets = betsResponse.ok ? ((await betsResponse.json()) as Bet[]) : [];
+  const bets = betsResponse.ok
+    ? ((await betsResponse.json()) as VerifiedBet[])
+    : [];
   const tipsters = tipstersResponse.ok
     ? ((await tipstersResponse.json()) as Tipster[])
     : [];
@@ -151,7 +172,7 @@ async function renderBetsPage(
 }
 
 function betsPage(
-  bets: Bet[],
+  bets: VerifiedBet[],
   tipsters: Tipster[],
   filters: { status: string; tipster: string },
   values: FormValues,
@@ -163,7 +184,7 @@ function betsPage(
     html`
       <header>
         <h1>Bet tracker</h1>
-        <nav><a href="/">Bets</a><a href="/stats/view">Stats</a></nav>
+        <nav><a href="/">Bets</a><a href="/stats/view">Stats</a><a href="/verify/view">Verify</a></nav>
       </header>
       ${error === null ? "" : html`<div class="error" role="alert">${error}</div>`}
       <section>
@@ -235,7 +256,7 @@ function betsPage(
   );
 }
 
-function betRow(bet: Bet): HtmlContent {
+function betRow(bet: VerifiedBet): HtmlContent {
   const risked = riskedPence(bet);
   const moneyEligible =
     bet.status !== "void" &&
@@ -247,9 +268,12 @@ function betRow(bet: Bet): HtmlContent {
   const hint = bet.stake_type === "cash"
     ? `void returns stake: ${formatPence(risked)}`
     : "void returns nothing (free bet)";
+  const mismatchAttribute = bet.verification.status === "mismatch"
+    ? html` class="mismatch"`
+    : "";
 
   return html`
-    <tr data-bet-row>
+    <tr data-bet-row${mismatchAttribute}>
       <td>${londonLocalDate(bet.placed_at)}</td>
       <td>${bet.event}</td>
       <td>${bet.selection}</td>
@@ -259,7 +283,11 @@ function betRow(bet: Bet): HtmlContent {
       <td>${formatPence(risked)}</td>
       <td>${formatOdds(bet.odds_hundredths)}</td>
       <td>${bet.status}</td>
-      <td>${bet.returns_pence === null ? "—" : formatPence(bet.returns_pence)}</td>
+      <td>${bet.returns_pence === null
+        ? "—"
+        : bet.verification.status === "mismatch"
+          ? html`${formatPence(bet.returns_pence)} <small>expected ${formatPence(bet.verification.expected_returns_pence as number)}</small>`
+          : formatPence(bet.returns_pence)}</td>
       <td>${profit}</td>
       <td class="actions">
         <form action=${`/ui/bets/${bet.id}/settle`} method="post">
@@ -278,6 +306,60 @@ function betRow(bet: Bet): HtmlContent {
   `;
 }
 
+function verifyPage(
+  report: VerificationReport,
+  filters: { from: string; to: string; tipster: string },
+  error: string | null = null,
+): HtmlContent {
+  return layout(
+    "Bet tracker verification",
+    html`
+      <header>
+        <h1>Returns verification</h1>
+        <nav><a href="/">Bets</a><a href="/stats/view">Stats</a><a href="/verify/view">Verify</a></nav>
+      </header>
+      ${error === null ? "" : html`<div class="error" role="alert">${error}</div>`}
+      <section>
+        <form action="/verify/view" method="get" class="filters">
+          <label>From <input type="date" name="from" value=${filters.from}></label>
+          <label>To <input type="date" name="to" value=${filters.to}></label>
+          <label>Tipster <input type="text" name="tipster" value=${filters.tipster}></label>
+          <button type="submit">Filter</button>
+        </form>
+      </section>
+      <section>
+        <h2>Summary</h2>
+        <p>Checked: ${report.checked_count} · OK: ${report.ok_count} · Mismatches: ${report.mismatch_count} · Uncheckable: ${report.uncheckable_count} · Net delta: ${formatPence(report.net_delta_pence)}</p>
+      </section>
+      <section>
+        <h2>Discrepancies</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Event</th><th>Selection</th><th>Tipster</th><th>Status</th><th>Stake</th><th>Odds</th><th>Recorded</th><th>Expected</th><th>Delta</th><th>Error</th></tr></thead>
+            <tbody>
+              ${report.discrepancies.map((bet) => html`
+                <tr>
+                  <td>${londonLocalDate(bet.placed_at)}</td>
+                  <td>${bet.event}</td>
+                  <td>${bet.selection}</td>
+                  <td>${bet.tipster?.name ?? "—"}</td>
+                  <td>${bet.status}</td>
+                  <td>${formatPence(bet.stake_pence)}</td>
+                  <td>${formatOdds(bet.odds_hundredths)}</td>
+                  <td>${bet.returns_pence === null ? "—" : formatPence(bet.returns_pence)}</td>
+                  <td>${bet.verification.expected_returns_pence === null ? "—" : formatPence(bet.verification.expected_returns_pence)}</td>
+                  <td>${bet.verification.delta_pence === null ? "—" : formatPence(bet.verification.delta_pence)}</td>
+                  <td>${bet.verification.error ?? "—"}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `,
+  );
+}
+
 function statsPage(
   stats: Stats,
   filters: { from: string; to: string; tipster: string },
@@ -288,7 +370,7 @@ function statsPage(
     html`
       <header>
         <h1>Stats dashboard</h1>
-        <nav><a href="/">Bets</a><a href="/stats/view">Stats</a></nav>
+        <nav><a href="/">Bets</a><a href="/stats/view">Stats</a><a href="/verify/view">Verify</a></nav>
       </header>
       ${error === null ? "" : html`<div class="error" role="alert">${error}</div>`}
       <section>
@@ -364,6 +446,7 @@ function layout(title: string, content: HtmlContent): HtmlContent {
           button { cursor: pointer; }
           details { margin: .75rem 0; }
           .error { padding: .75rem; border: 1px solid #c0392b; background: #fdedec; color: #922b21; }
+          .mismatch { background: #fdedec; }
           .table-wrap { overflow-x: auto; }
           table { width: 100%; border-collapse: collapse; }
           th, td { padding: .5rem; border-bottom: 1px solid #d5dbdb; text-align: left; vertical-align: top; white-space: nowrap; }
@@ -428,6 +511,17 @@ async function readApiError(response: Response): Promise<string> {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "invalid form submission";
+}
+
+function emptyVerificationReport(): VerificationReport {
+  return {
+    checked_count: 0,
+    ok_count: 0,
+    mismatch_count: 0,
+    uncheckable_count: 0,
+    net_delta_pence: 0,
+    discrepancies: [],
+  };
 }
 
 function emptyStats(): Stats {

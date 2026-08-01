@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { parseOdds } from "./odds.ts";
 import { computeStats, londonLocalDate } from "./stats.ts";
 import { createUi } from "./ui.ts";
+import { verifyBet, verifyBets } from "./verify.ts";
 import type {
   Bet,
   BetStatus,
@@ -11,6 +12,7 @@ import type {
   Pence,
   StakeType,
   Tipster,
+  VerifiedBet,
 } from "./types.ts";
 
 const BET_TYPES = ["single", "each_way"] as const;
@@ -202,6 +204,39 @@ export function createApp(db: Database.Database): Hono {
       });
 
       return c.json(computeStats(bets));
+    } catch (error) {
+      return c.json({ error: errorMessage(error) }, 400);
+    }
+  });
+
+  app.get("/verify", (c) => {
+    try {
+      const from = validateStatsDate(c.req.query("from"), "from");
+      const to = validateStatsDate(c.req.query("to"), "to");
+      const tipster = c.req.query("tipster");
+      const conditions = ["b.deleted_at IS NULL", "b.status != 'open'"];
+      const parameters: string[] = [];
+
+      if (tipster !== undefined) {
+        conditions.push("t.name = ? COLLATE NOCASE");
+        parameters.push(tipster);
+      }
+
+      const rows = db
+        .prepare(
+          `${SELECT_BET}
+           WHERE ${conditions.join(" AND ")}`,
+        )
+        .all(...parameters) as BetDbRow[];
+      const bets = rows.map(toBet).filter((bet) => {
+        const localDate = londonLocalDate(bet.placed_at);
+        return (
+          (from === undefined || localDate >= from) &&
+          (to === undefined || localDate <= to)
+        );
+      });
+
+      return c.json(verifyBets(bets));
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 400);
     }
@@ -615,8 +650,8 @@ function getBetRow(db: Database.Database, id: number): BetDbRow | undefined {
     .get(id) as BetDbRow | undefined;
 }
 
-function toBet(row: BetDbRow): Bet {
-  return {
+function toBet(row: BetDbRow): VerifiedBet {
+  const bet: Bet = {
     id: row.id,
     placed_at: row.placed_at,
     event: row.event,
@@ -639,6 +674,10 @@ function toBet(row: BetDbRow): Bet {
     dead_heat_place_den: row.dead_heat_place_den,
     status: row.status,
     returns_pence: row.returns_pence,
+  };
+  return {
+    ...bet,
+    verification: verifyBet(bet),
   };
 }
 

@@ -37,3 +37,20 @@ export interface Bet {
   status: BetStatus;
   returns_pence: Pence | null;
 }
+
+export type VerificationStatus =
+  | "ok"
+  | "mismatch"
+  | "uncheckable"
+  | "not_applicable";
+
+export interface BetVerification {
+  status: VerificationStatus;
+  expected_returns_pence: Pence | null;
+  delta_pence: Pence | null;
+  error: string | null;
+}
+
+export interface VerifiedBet extends Bet {
+  verification: BetVerification;
+}
