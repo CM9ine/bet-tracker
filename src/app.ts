@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { parseOdds } from "./odds.ts";
 import { computeStats, londonLocalDate } from "./stats.ts";
+import { createUi } from "./ui.ts";
 import type {
   Bet,
   BetStatus,
@@ -301,6 +302,8 @@ export function createApp(db: Database.Database): Hono {
     const tipsters = db.prepare("SELECT id, name FROM tipsters ORDER BY name").all() as Tipster[];
     return c.json(tipsters);
   });
+
+  app.route("/", createUi(app));
 
   return app;
 }
