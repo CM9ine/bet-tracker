@@ -41,6 +41,7 @@ function bet(overrides: Partial<Bet> = {}): Bet {
     dead_heat_place_den: null,
     status: "won",
     returns_pence: 2500,
+    profit_pence: 1500,
     ...overrides,
   };
 }

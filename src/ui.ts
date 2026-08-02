@@ -213,13 +213,13 @@ function betsPage(
                 ${option("free_sr", "Free SR", value(values, "stake_type") || "cash")}
               </select>
             </label>
+            ${eachWayIntegerInput("Place fraction numerator", "place_fraction_num", values)}
+            ${eachWayIntegerInput("Place fraction denominator", "place_fraction_den", values)}
+            ${eachWayIntegerInput("Places count", "places_count", values)}
           </div>
           <details>
             <summary>Advanced</summary>
             <div class="form-grid advanced">
-              ${integerInput("Place fraction numerator", "place_fraction_num", values)}
-              ${integerInput("Place fraction denominator", "place_fraction_den", values)}
-              ${integerInput("Places count", "places_count", values)}
               ${integerInput("Rule 4 pence in pound", "rule4_pence_in_pound", values)}
               ${integerInput("Win dead heat numerator", "dead_heat_win_num", values)}
               ${integerInput("Win dead heat denominator", "dead_heat_win_den", values)}
@@ -229,6 +229,17 @@ function betsPage(
           </details>
           <button type="submit">Add bet</button>
         </form>
+        <script>
+          const betType = document.querySelector('select[name="bet_type"]');
+          const placeTerms = document.querySelectorAll("[data-each-way-required]");
+          const syncEachWayRequired = () => {
+            for (const input of placeTerms) {
+              input.required = betType?.value === "each_way";
+            }
+          };
+          betType?.addEventListener("change", syncEachWayRequired);
+          syncEachWayRequired();
+        </script>
       </section>
       <section>
         <div class="section-heading">
@@ -258,13 +269,7 @@ function betsPage(
 
 function betRow(bet: VerifiedBet): HtmlContent {
   const risked = riskedPence(bet);
-  const moneyEligible =
-    bet.status !== "void" &&
-    bet.status !== "open" &&
-    (bet.status === "lost" || bet.returns_pence !== null);
-  const profit = moneyEligible
-    ? formatPence((bet.returns_pence ?? 0) - risked)
-    : "—";
+  const profit = bet.profit_pence === null ? "—" : formatPence(bet.profit_pence);
   const hint = bet.stake_type === "cash"
     ? `void returns stake: ${formatPence(risked)}`
     : "void returns nothing (free bet)";
@@ -294,8 +299,8 @@ function betRow(bet: VerifiedBet): HtmlContent {
           <select name="status" aria-label="Status">
             ${BET_STATUSES.map((status) => option(status, status, bet.status))}
           </select>
-          <input type="text" name="returns" placeholder="25.00" aria-label="Returns">
-          <small>${hint}</small>
+          <input type="text" name="returns" placeholder="Auto" aria-label="Returns">
+          <small>Calculated automatically when blank; ${hint}</small>
           <button type="submit">Settle</button>
         </form>
         <form action=${`/ui/bets/${bet.id}/delete`} method="post">
@@ -457,6 +462,10 @@ function layout(title: string, content: HtmlContent): HtmlContent {
       </head>
       <body>${content}</body>
     </html>`;
+}
+
+function eachWayIntegerInput(label: string, name: string, values: FormValues): HtmlContent {
+  return html`<label>${label}<input type="number" min="0" step="1" name=${name} value=${value(values, name)} data-each-way-required></label>`;
 }
 
 function integerInput(label: string, name: string, values: FormValues): HtmlContent {

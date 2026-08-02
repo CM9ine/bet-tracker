@@ -23,7 +23,114 @@ async function createBet(
   return (await response.json()) as Record<string, unknown>;
 }
 
+async function patchBet(
+  app: ReturnType<typeof createApp>,
+  id: number,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  return app.request("/bets/" + id, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("app", () => {
+  it.each([
+    ["won cash single", "won", {}, 2500, 1500],
+    ["won cash single at evens", "won", { odds: "1.0" }, 1000, 0],
+    ["lost cash single", "lost", {}, 0, -1000],
+    ["void cash single", "void", {}, 1000, 0],
+    ["void free SNR single", "void", { stake_type: "free_snr" }, 0, 0],
+    ["won free SNR single", "won", { stake_type: "free_snr" }, 1500, 1500],
+    ["won cash each-way", "won", { bet_type: "each_way", place_fraction_num: 1, place_fraction_den: 5, places_count: 3 }, 3800, 1800],
+    ["placed cash each-way", "placed", { bet_type: "each_way", place_fraction_num: 1, place_fraction_den: 5, places_count: 3 }, 1300, -700],
+    ["lost cash each-way", "lost", { bet_type: "each_way", place_fraction_num: 1, place_fraction_den: 5, places_count: 3 }, 0, -2000],
+    ["void cash each-way", "void", { bet_type: "each_way", place_fraction_num: 1, place_fraction_den: 5, places_count: 3 }, 2000, 0],
+    ["placed cash each-way with flooring", "placed", { stake_pence: 333, bet_type: "each_way", place_fraction_num: 1, place_fraction_den: 5, places_count: 3 }, 432, -234],
+  ] as const)("auto-settles %s", async (_name, status, terms, expectedReturns, expectedProfit) => {
+    const app = createApp(openDb(":memory:"));
+    const created = await createBet(app, terms);
+    const response = await patchBet(app, created.id as number, { status });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status,
+      returns_pence: expectedReturns,
+      profit_pence: expectedProfit,
+    });
+  });
+
+  it("auto-settles a settled POST and treats an explicit null return as auto", async () => {
+    const app = createApp(openDb(":memory:"));
+    const created = await createBet(app, { status: "won" });
+    expect(created).toMatchObject({ returns_pence: 2500, profit_pence: 1500 });
+
+    const open = await createBet(app, { selection: "Blank override" });
+    const response = await patchBet(app, open.id as number, { status: "won", returns_pence: null });
+    expect(await response.json()).toMatchObject({ returns_pence: 2500, profit_pence: 1500 });
+  });
+
+  it("preserves manual returns for no-op settlement writes and places_count edits", async () => {
+    const app = createApp(openDb(":memory:"));
+    const created = await createBet(app, {
+      bet_type: "each_way",
+      place_fraction_num: 1,
+      place_fraction_den: 5,
+      places_count: 3,
+      status: "won",
+      returns_pence: 2400,
+    });
+    const response = await patchBet(app, created.id as number, {
+      odds: "2.50",
+      places_count: 4,
+    });
+    expect(await response.json()).toMatchObject({
+      places_count: 4,
+      returns_pence: 2400,
+      profit_pence: 400,
+    });
+  });
+
+  it("preserves a manual override and reports its verification mismatch", async () => {
+    const app = createApp(openDb(":memory:"));
+    const created = await createBet(app);
+    const response = await patchBet(app, created.id as number, { status: "won", returns_pence: 2400 });
+    expect(await response.json()).toMatchObject({ returns_pence: 2400, profit_pence: 1400 });
+    expect(await (await app.request("/verify")).json()).toMatchObject({
+      discrepancies: [{ verification: { status: "mismatch", expected_returns_pence: 2500, delta_pence: -100, error: null } }],
+    });
+  });
+
+  it("recomputes only when settlement inputs change and clears on un-settle", async () => {
+    const app = createApp(openDb(":memory:"));
+    const created = await createBet(app);
+    const id = created.id as number;
+
+    expect(await (await patchBet(app, id, { status: "won" })).json()).toMatchObject({ returns_pence: 2500, profit_pence: 1500 });
+    expect(await (await patchBet(app, id, { event: "Ascot 15:05" })).json()).toMatchObject({ event: "Ascot 15:05", returns_pence: 2500 });
+    expect(await (await patchBet(app, id, { odds: "3.0" })).json()).toMatchObject({ returns_pence: 3000, profit_pence: 2000 });
+    expect(await (await patchBet(app, id, { status: "lost" })).json()).toMatchObject({ returns_pence: 0, profit_pence: -1000 });
+    expect(await (await patchBet(app, id, { status: "open" })).json()).toMatchObject({ returns_pence: null, profit_pence: null });
+  });
+
+  it.each([
+    ["each-way without place terms", { bet_type: "each_way", status: "placed" }, "place_fraction_num is required and must be a positive integer"],
+    ["placed single", { status: "placed" }, "a single bet cannot have placed status"],
+  ])("rejects settlement of a %s without writing", async (_name, patch, error) => {
+    const db = openDb(":memory:");
+    const app = createApp(db);
+    const created = await createBet(app);
+    if ("bet_type" in patch && patch.bet_type === "each_way") {
+      db.prepare("UPDATE bets SET bet_type = 'each_way' WHERE id = ?").run(created.id);
+    }
+
+    const response = await patchBet(app, created.id as number, patch);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error });
+    expect(await (await app.request("/bets/" + created.id)).json()).toMatchObject({ status: "open", returns_pence: null });
+  });
+
   it("responds to health check", async () => {
     const app = createApp(openDb(":memory:"));
     const res = await app.request("/health");
@@ -32,12 +139,14 @@ describe("app", () => {
   });
 
   it("returns the exact stats fixture and excludes open and deleted bets", async () => {
-    const app = createApp(openDb(":memory:"));
+    const db = openDb(":memory:");
+    const app = createApp(db);
     await createBet(app, { selection: "A", status: "won", returns_pence: 2500 });
     await createBet(app, { selection: "B", odds: "2.0", status: "lost" });
     await createBet(app, { selection: "C", odds: "3.0", stake_type: "free_snr", status: "won", returns_pence: 2000 });
     await createBet(app, { selection: "D", status: "void", returns_pence: 1000 });
     const incomplete = await createBet(app, { selection: "E", status: "won", returns_pence: null });
+    db.prepare("UPDATE bets SET returns_pence = NULL WHERE id = ?").run(incomplete.id);
     await createBet(app, { selection: "Open" });
     await createBet(app, { selection: "Deleted", status: "won", returns_pence: 9999 });
     expect((await app.request("/bets/7", { method: "DELETE" })).status).toBe(204);
