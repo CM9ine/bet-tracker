@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { parseOdds } from "./odds.ts";
+import { riskedPence, settle } from "./settle.ts";
 import { computeStats, londonLocalDate } from "./stats.ts";
 import { createUi } from "./ui.ts";
 import { verifyBet, verifyBets } from "./verify.ts";
@@ -345,8 +346,7 @@ export function createApp(db: Database.Database): Hono {
 
 function validateCreate(body: Record<string, unknown>): ValidatedBet {
   const odds = requireString(body.odds, "odds");
-
-  return validateBet({
+  const bet = validateBet({
     placedAt: body.placed_at,
     event: body.event,
     selection: body.selection,
@@ -366,10 +366,15 @@ function validateCreate(body: Record<string, unknown>): ValidatedBet {
     status: body.status ?? "open",
     returnsPence: body.returns_pence ?? null,
   });
+
+  return {
+    ...bet,
+    returnsPence: resolveReturnsPence(bet, body),
+  };
 }
 
 function validatePatch(existing: BetDbRow, body: Record<string, unknown>): ValidatedBet {
-  return validateBet({
+  const bet = validateBet({
     placedAt: propertyOr(body, "placed_at", existing.placed_at),
     event: propertyOr(body, "event", existing.event),
     selection: propertyOr(body, "selection", existing.selection),
@@ -405,6 +410,58 @@ function validatePatch(existing: BetDbRow, body: Record<string, unknown>): Valid
     status: propertyOr(body, "status", existing.status),
     returnsPence: propertyOr(body, "returns_pence", existing.returns_pence),
   });
+
+  return {
+    ...bet,
+    returnsPence: resolveReturnsPence(bet, body, existing),
+  };
+}
+
+function resolveReturnsPence(
+  bet: ValidatedBet,
+  body: Record<string, unknown>,
+  existing?: BetDbRow,
+): Pence | null {
+  if (hasProperty(body, "returns_pence") && body.returns_pence !== null) {
+    return bet.returnsPence;
+  }
+  if (bet.status === "open") {
+    return null;
+  }
+
+  const settlementChanged =
+    existing === undefined ||
+    bet.status !== existing.status ||
+    bet.stakePence !== existing.stake_pence ||
+    bet.oddsHundredths !== existing.odds_hundredths ||
+    bet.betType !== existing.bet_type ||
+    bet.stakeType !== existing.stake_type ||
+    bet.placeFractionNum !== existing.place_fraction_num ||
+    bet.placeFractionDen !== existing.place_fraction_den ||
+    bet.rule4PenceInPound !== existing.rule4_pence_in_pound ||
+    bet.deadHeatWinNum !== existing.dead_heat_win_num ||
+    bet.deadHeatWinDen !== existing.dead_heat_win_den ||
+    bet.deadHeatPlaceNum !== existing.dead_heat_place_num ||
+    bet.deadHeatPlaceDen !== existing.dead_heat_place_den;
+
+  if (!settlementChanged && existing !== undefined) {
+    return existing.returns_pence;
+  }
+
+  return settle({
+    stake_pence: bet.stakePence,
+    odds_hundredths: bet.oddsHundredths,
+    bet_type: bet.betType,
+    stake_type: bet.stakeType,
+    place_fraction_num: bet.placeFractionNum,
+    place_fraction_den: bet.placeFractionDen,
+    rule4_pence_in_pound: bet.rule4PenceInPound,
+    dead_heat_win_num: bet.deadHeatWinNum,
+    dead_heat_win_den: bet.deadHeatWinDen,
+    dead_heat_place_num: bet.deadHeatPlaceNum,
+    dead_heat_place_den: bet.deadHeatPlaceDen,
+    status: bet.status,
+  }).total_pence;
 }
 
 function validateBet(input: {
@@ -674,6 +731,10 @@ function toBet(row: BetDbRow): VerifiedBet {
     dead_heat_place_den: row.dead_heat_place_den,
     status: row.status,
     returns_pence: row.returns_pence,
+    profit_pence:
+      row.returns_pence === null || row.status === "open"
+        ? null
+        : row.returns_pence - riskedPence(row),
   };
   return {
     ...bet,

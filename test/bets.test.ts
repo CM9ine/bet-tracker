@@ -65,6 +65,7 @@ describe("bets API", () => {
       dead_heat_place_den: null,
       status: "open",
       returns_pence: null,
+      profit_pence: null,
       verification: {
         status: "not_applicable",
         expected_returns_pence: null,
@@ -200,7 +201,7 @@ describe("bets API", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
-  it("stores supplied returns verbatim and never computes missing returns", async () => {
+  it("stores supplied returns verbatim and computes missing settled returns", async () => {
     const { app } = setup();
     await createBet(app);
     await createBet(app, { selection: "Second" });
@@ -212,7 +213,7 @@ describe("bets API", () => {
     expect(await stored.json()).toMatchObject({ status: "won", returns_pence: 2500 });
 
     const untouched = await sendJson(app, "/bets/2", "PATCH", { status: "won" });
-    expect(await untouched.json()).toMatchObject({ status: "won", returns_pence: null });
+    expect(await untouched.json()).toMatchObject({ status: "won", returns_pence: 2500, profit_pence: 1500 });
   });
 
   it("soft-deletes a bet and returns 404 when deleting it twice", async () => {
@@ -236,11 +237,11 @@ describe("bets API", () => {
     expect(await response.json()).toMatchObject({ stake_type: stakeType });
   });
 
-  it("accepts placed status", async () => {
+  it("rejects placed status for a single", async () => {
     const { app } = setup();
     const response = await createBet(app, { status: "placed" });
-    expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({ status: "placed" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "a single bet cannot have placed status" });
   });
 
   it("round-trips Rule 4 and dead-heat terms through create, get, and patch", async () => {

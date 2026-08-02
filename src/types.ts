@@ -36,6 +36,7 @@ export interface Bet {
   dead_heat_place_den: number | null;
   status: BetStatus;
   returns_pence: Pence | null;
+  profit_pence: Pence | null;
 }
 
 export type VerificationStatus =

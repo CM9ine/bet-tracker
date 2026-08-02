@@ -132,20 +132,31 @@ describe("server-rendered UI", () => {
     });
   });
 
-  it("stores blank won returns as null and reports the bet incomplete", async () => {
+  it("automatically calculates won returns when the Returns input is blank", async () => {
     const app = setup();
     await createJson(app);
     expect((await submitForm(app, "/ui/bets/1/settle", { status: "won", returns: "" })).status).toBe(303);
-    expect(await (await app.request("/bets/1")).json()).toMatchObject({ returns_pence: null });
-    expect(await (await app.request("/stats")).json()).toMatchObject({ incomplete_bet_ids: [1] });
+    expect(await (await app.request("/bets/1")).json()).toMatchObject({ returns_pence: 2500, profit_pence: 1500 });
   });
 
-  it("stores blank void returns as null without reporting incompleteness", async () => {
+  it("renders automatically calculated void returns and zero profit", async () => {
     const app = setup();
     await createJson(app);
     expect((await submitForm(app, "/ui/bets/1/settle", { status: "void", returns: "" })).status).toBe(303);
-    expect(await (await app.request("/bets/1")).json()).toMatchObject({ returns_pence: null });
-    expect(await (await app.request("/stats")).json()).toMatchObject({ incomplete_bet_ids: [] });
+    expect(await (await app.request("/bets/1")).json()).toMatchObject({ returns_pence: 1000, profit_pence: 0 });
+    const body = await (await app.request("/")).text();
+    expect(body).toContain("£10.00");
+    expect(body).toContain("£0.00");
+  });
+
+  it("exposes each-way place terms outside Advanced", async () => {
+    const body = await (await setup().request("/")).text();
+    const advanced = body.match(/<details>[\s\S]*?<\/details>/)?.[0] ?? "";
+    for (const name of ["place_fraction_num", "place_fraction_den", "places_count"]) {
+      expect(body).toContain('name=' + name);
+      expect(body).toContain("data-each-way-required");
+      expect(advanced).not.toContain('name="' + name + '"');
+    }
   });
 
   it.each([
